@@ -1,22 +1,68 @@
 import cv2
 import numpy as np
 
-def morphological_cleaning(binary_img, kernel_size=3):
-    kernel = np.ones((kernel_size, kernel_size), np.uint8)
-    opened = cv2.morphologyEx(binary_img, cv2.MORPH_OPEN, kernel)
-    cleaned = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
-    return cleaned
+def detect_piece_circle(img_prepared, dp=1.2, min_dist=80, param1=100, param2=30,
+                        min_radius=70, max_radius=120):
+    blurred = cv2.GaussianBlur(img_prepared, (9, 9), 2)
 
-def keep_largest_contour(binary_img):
-    contours, _ = cv2.findContours(binary_img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    mask = np.zeros_like(binary_img)
+    circles = cv2.HoughCircles(
+        blurred,
+        cv2.HOUGH_GRADIENT,
+        dp=dp,
+        minDist=min_dist,
+        param1=param1,
+        param2=param2,
+        minRadius=min_radius,
+        maxRadius=max_radius
+    )
 
-    if len(contours) == 0:
-        return mask, None
+    if circles is None:
+        return None
 
-    largest_contour = max(contours, key=cv2.contourArea)
-    cv2.drawContours(mask, [largest_contour], -1, 255, thickness=cv2.FILLED)
-    return mask, largest_contour
+    circles = np.round(circles[0]).astype(int)
+
+    H, W = img_prepared.shape
+    img_cx, img_cy = W / 2, H / 2
+
+    best_circle = None
+    best_score = -1
+
+    for x, y, r in circles:
+        dist = np.sqrt((x - img_cx) ** 2 + (y - img_cy) ** 2)
+        score = r - 0.5 * dist
+        if score > best_score:
+            best_score = score
+            best_circle = (x, y, r)
+
+    return best_circle
+
+def segment_main_object_circle(img_prepared):
+    circle = detect_piece_circle(img_prepared)
+
+    if circle is None:
+        H, W = img_prepared.shape
+        x, y = W // 2, H // 2
+        r = int(0.34 * min(H, W))
+        mask = np.zeros_like(img_prepared)
+        cv2.circle(mask, (x, y), r, 255, thickness=-1)
+
+        return {
+            "mask": mask,
+            "center": (x, y),
+            "radius": r,
+            "selected_mode": "FALLBACK_CIRCLE"
+        }
+
+    x, y, r = circle
+    mask = np.zeros_like(img_prepared)
+    cv2.circle(mask, (x, y), r, 255, thickness=-1)
+
+    return {
+        "mask": mask,
+        "center": (x, y),
+        "radius": r,
+        "selected_mode": "HOUGH_CIRCLE"
+    }
 
 def apply_mask(gray_img, mask):
     return cv2.bitwise_and(gray_img, gray_img, mask=mask)
