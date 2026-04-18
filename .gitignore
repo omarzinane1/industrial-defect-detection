@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environnements virtuels
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Fichiers temporaires
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# Donnees et sorties lourdes
+data/raw/**
+data/processed/**
+data/features/**
+results/figures/**
+results/metrics/**
+results/models/**
+
+# Garder la structure des dossiers
+!data/raw/
+!data/raw/.gitkeep
+!data/raw/casting_data/
+!data/raw/casting_data/.gitkeep
+!data/processed/.gitkeep
+!data/features/.gitkeep
+!results/figures/.gitkeep
+!results/metrics/.gitkeep
+!results/models/.gitkeep
