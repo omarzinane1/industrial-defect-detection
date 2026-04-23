@@ -10,11 +10,41 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
-from src.inference import METHOD_RULES, METHOD_SVM, PredictionResult, predict_image
+from src.inference import INVALID_LABEL, METHOD_RULES, METHOD_SVM, PredictionResult, predict_image
+from src.pipeline_visualization import (
+    VIEW_CONTOURS,
+    VIEW_CONTRAST,
+    VIEW_FEATURES,
+    VIEW_ORIGINAL,
+    VIEW_SEGMENTATION,
+    VIEW_SUSPECT_ZONES,
+    VIEW_THRESHOLD,
+    VIEW_TITLES,
+    PipelineVisualization,
+    build_pipeline_visualization,
+    format_pipeline_statistics,
+)
 
 
-APP_TITLE = "Détection de défauts industriels"
-PREVIEW_SIZE = (640, 480)
+APP_TITLE = "Detection de defauts industriels"
+PREVIEW_SIZE = (720, 520)
+PIPELINE_PREVIEW_SIZE = (560, 460)
+
+COLOR_BG = "#07111f"
+COLOR_PANEL = "#111c2b"
+COLOR_PANEL_ALT = "#1a2b3f"
+COLOR_BORDER = "#36516e"
+COLOR_TEXT = "#f3f4f6"
+COLOR_MUTED = "#b6c2cf"
+COLOR_ACCENT = "#0ea5e9"
+COLOR_OK = "#39d98a"
+COLOR_DEFECT = "#ff4d4f"
+COLOR_WARNING = "#fbbf24"
+COLOR_CARD_NEUTRAL = "#1b2a3c"
+COLOR_CARD_OK = "#06351f"
+COLOR_CARD_DEFECT = "#42151a"
+COLOR_CARD_INVALID = "#3a2a08"
+COLOR_INPUT = "#07111f"
 
 
 class DefectDetectionApp(tk.Tk):
@@ -23,14 +53,16 @@ class DefectDetectionApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("1180x720")
-        self.minsize(1050, 650)
+        self.geometry("1320x800")
+        self.minsize(1180, 720)
 
         self.method_var = tk.StringVar(value=METHOD_RULES)
-        self.source_var = tk.StringVar(value="Aucune source")
-        self.status_var = tk.StringVar(value="Prêt.")
-        self.prediction_var = tk.StringVar(value="Aucune prédiction")
+        self.source_var = tk.StringVar(value="Source : aucune")
+        self.status_var = tk.StringVar(value="Pret.")
+        self.prediction_var = tk.StringVar(value="Aucune prediction")
         self.confidence_var = tk.StringVar(value="Score non disponible")
+        self.validation_var = tk.StringVar(value="Statut validation : non analyse")
+        self.summary_var = tk.StringVar(value="Resume : aucune analyse lancee.")
 
         self.current_image: np.ndarray | None = None
         self.current_image_path: Path | None = None
@@ -38,7 +70,14 @@ class DefectDetectionApp(tk.Tk):
         self.camera_running = False
         self.predict_live = tk.BooleanVar(value=False)
         self._last_live_prediction_ms = 0
+        self._last_pipeline_update_ms = 0
+
         self._photo_ref: ImageTk.PhotoImage | None = None
+        self.pipeline_windows: dict[str, tk.Toplevel] = {}
+        self.pipeline_image_labels: dict[str, tk.Label] = {}
+        self.pipeline_text_widgets: dict[str, tk.Text] = {}
+        self.pipeline_photo_refs: dict[str, ImageTk.PhotoImage] = {}
+        self.pipeline_visualization: PipelineVisualization | None = None
 
         self._configure_style()
         self._build_layout()
@@ -51,31 +90,71 @@ class DefectDetectionApp(tk.Tk):
         except tk.TclError:
             pass
 
-        style.configure("TFrame", background="#f5f6f8")
-        style.configure("Panel.TFrame", background="#ffffff", relief="solid", borderwidth=1)
-        style.configure("TLabel", background="#f5f6f8", foreground="#1f2933", font=("Segoe UI", 10))
-        style.configure("Panel.TLabel", background="#ffffff", foreground="#1f2933", font=("Segoe UI", 10))
-        style.configure("Title.TLabel", background="#f5f6f8", font=("Segoe UI", 18, "bold"))
-        style.configure("Section.TLabel", background="#ffffff", font=("Segoe UI", 12, "bold"))
-        style.configure("Result.TLabel", background="#ffffff", font=("Segoe UI", 20, "bold"))
-        style.configure("Status.TLabel", background="#e9edf2", foreground="#344054", padding=(8, 5))
-        style.configure("TButton", font=("Segoe UI", 10), padding=(10, 6))
-        style.configure("TRadiobutton", background="#ffffff", font=("Segoe UI", 10))
-        style.configure("TCheckbutton", background="#ffffff", font=("Segoe UI", 10))
+        style.configure("TFrame", background=COLOR_BG)
+        style.configure("Panel.TFrame", background=COLOR_PANEL, relief="solid", borderwidth=1)
+        style.configure("PanelAlt.TFrame", background=COLOR_PANEL_ALT, relief="solid", borderwidth=1)
+        style.configure("TLabel", background=COLOR_BG, foreground=COLOR_TEXT, font=("Segoe UI", 10))
+        style.configure("Panel.TLabel", background=COLOR_PANEL, foreground=COLOR_TEXT, font=("Segoe UI", 10))
+        style.configure("Muted.TLabel", background=COLOR_PANEL, foreground=COLOR_MUTED, font=("Segoe UI", 9))
+        style.configure("Title.TLabel", background=COLOR_BG, foreground=COLOR_TEXT, font=("Segoe UI", 20, "bold"))
+        style.configure("Subtitle.TLabel", background=COLOR_BG, foreground=COLOR_MUTED, font=("Segoe UI", 10))
+        style.configure("Section.TLabel", background=COLOR_PANEL, foreground=COLOR_TEXT, font=("Segoe UI", 12, "bold"))
+        style.configure("ResultNeutral.TLabel", background=COLOR_PANEL_ALT, foreground=COLOR_TEXT, font=("Segoe UI", 22, "bold"))
+        style.configure("ResultOk.TLabel", background=COLOR_PANEL_ALT, foreground=COLOR_OK, font=("Segoe UI", 22, "bold"))
+        style.configure("ResultDefect.TLabel", background=COLOR_PANEL_ALT, foreground=COLOR_DEFECT, font=("Segoe UI", 22, "bold"))
+        style.configure("ResultInvalid.TLabel", background=COLOR_PANEL_ALT, foreground=COLOR_WARNING, font=("Segoe UI", 22, "bold"))
+        style.configure("Status.TLabel", background="#0b2536", foreground=COLOR_TEXT, padding=(10, 6))
+        style.configure(
+            "TButton",
+            background="#26384d",
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 10),
+            padding=(10, 7),
+        )
+        style.configure(
+            "Primary.TButton",
+            background=COLOR_ACCENT,
+            foreground="#06101c",
+            font=("Segoe UI", 10, "bold"),
+            padding=(10, 9),
+        )
+        style.configure(
+            "Danger.TButton",
+            background="#7f1d1d",
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 10, "bold"),
+            padding=(10, 7),
+        )
+        style.configure(
+            "Pipeline.TButton",
+            background="#1e3a56",
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 9),
+            padding=(8, 7),
+        )
+        style.configure("TRadiobutton", background=COLOR_PANEL, foreground=COLOR_TEXT, font=("Segoe UI", 10))
+        style.configure("TCheckbutton", background=COLOR_PANEL, foreground=COLOR_TEXT, font=("Segoe UI", 10))
+
+        style.map("TButton", background=[("active", "#314761")])
+        style.map("Primary.TButton", background=[("active", "#38bdf8")])
+        style.map("Danger.TButton", background=[("active", "#991b1b")])
+        style.map("TRadiobutton", background=[("active", COLOR_PANEL)])
+        style.map("TCheckbutton", background=[("active", COLOR_PANEL)])
 
     def _build_layout(self) -> None:
-        self.configure(background="#f5f6f8")
+        self.configure(background=COLOR_BG)
         self.columnconfigure(0, weight=3)
         self.columnconfigure(1, weight=2)
         self.rowconfigure(1, weight=1)
 
-        header = ttk.Frame(self, padding=(18, 14))
+        header = ttk.Frame(self, padding=(20, 14))
         header.grid(row=0, column=0, columnspan=2, sticky="ew")
         header.columnconfigure(0, weight=1)
         ttk.Label(header, text=APP_TITLE, style="Title.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
-            text="Choisir une méthode, charger une image ou utiliser la caméra, puis lancer l’analyse.",
+            text="Poste de controle : acquisition, prediction et visualisation du pipeline.",
+            style="Subtitle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         self._build_left_panel()
@@ -85,96 +164,238 @@ class DefectDetectionApp(tk.Tk):
         status.grid(row=2, column=0, columnspan=2, sticky="ew")
 
     def _build_left_panel(self) -> None:
-        left = ttk.Frame(self, style="Panel.TFrame", padding=14)
-        left.grid(row=1, column=0, sticky="nsew", padx=(18, 9), pady=(0, 18))
+        left = ttk.Frame(self, style="Panel.TFrame", padding=16)
+        left.grid(row=1, column=0, sticky="nsew", padx=(20, 10), pady=(0, 20))
         left.columnconfigure(0, weight=1)
         left.rowconfigure(1, weight=1)
 
-        ttk.Label(left, text="Aperçu image / caméra", style="Section.TLabel").grid(row=0, column=0, sticky="w")
-        self.preview_label = ttk.Label(left, text="Aucune image chargée", anchor="center", style="Panel.TLabel")
-        self.preview_label.grid(row=1, column=0, sticky="nsew", pady=12)
-        self.preview_label.configure(borderwidth=1, relief="solid")
+        ttk.Label(left, text="Visualisation principale", style="Section.TLabel").grid(row=0, column=0, sticky="w")
 
-        controls = ttk.Frame(left, style="Panel.TFrame")
-        controls.grid(row=2, column=0, sticky="ew")
-        for index in range(5):
-            controls.columnconfigure(index, weight=1)
+        preview_frame = tk.Frame(left, background="#060b12", highlightbackground=COLOR_BORDER, highlightthickness=1)
+        preview_frame.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
+        preview_frame.columnconfigure(0, weight=1)
+        preview_frame.rowconfigure(0, weight=1)
 
-        ttk.Button(controls, text="Importer une image", command=self.import_image).grid(
-            row=0, column=0, sticky="ew", padx=(0, 6)
+        self.preview_label = tk.Label(
+            preview_frame,
+            text="Aucune image chargee",
+            anchor="center",
+            background="#060b12",
+            foreground=COLOR_MUTED,
+            font=("Segoe UI", 13),
         )
-        ttk.Button(controls, text="Ouvrir la caméra", command=self.start_camera).grid(
-            row=0, column=1, sticky="ew", padx=6
-        )
-        ttk.Button(controls, text="Capturer", command=self.capture_camera_frame).grid(
-            row=0, column=2, sticky="ew", padx=6
-        )
-        ttk.Button(controls, text="Arrêter la caméra", command=self.stop_camera).grid(
-            row=0, column=3, sticky="ew", padx=6
-        )
-        ttk.Button(controls, text="Réinitialiser", command=self.reset).grid(row=0, column=4, sticky="ew", padx=(6, 0))
+        self.preview_label.grid(row=0, column=0, sticky="nsew")
 
     def _build_right_panel(self) -> None:
-        right = ttk.Frame(self, style="Panel.TFrame", padding=16)
-        right.grid(row=1, column=1, sticky="nsew", padx=(9, 18), pady=(0, 18))
-        right.columnconfigure(0, weight=1)
-        right.rowconfigure(5, weight=1)
+        right_shell = ttk.Frame(self, style="Panel.TFrame")
+        right_shell.grid(row=1, column=1, sticky="nsew", padx=(10, 20), pady=(0, 20))
+        right_shell.columnconfigure(0, weight=1)
+        right_shell.rowconfigure(0, weight=1)
 
-        ttk.Label(right, text="Méthode de prédiction", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        self.right_canvas = tk.Canvas(
+            right_shell,
+            background=COLOR_PANEL,
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        right_scrollbar = ttk.Scrollbar(right_shell, orient="vertical", command=self.right_canvas.yview)
+        self.right_canvas.configure(yscrollcommand=right_scrollbar.set)
+        self.right_canvas.grid(row=0, column=0, sticky="nsew")
+        right_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        right = ttk.Frame(self.right_canvas, style="Panel.TFrame", padding=16)
+        self.right_canvas_window = self.right_canvas.create_window((0, 0), window=right, anchor="nw")
+        self.right_canvas.bind("<Configure>", self._resize_right_canvas_content)
+        right.bind("<Configure>", self._update_right_scroll_region)
+        right_shell.bind("<Enter>", self._enable_right_mousewheel)
+        right_shell.bind("<Leave>", self._disable_right_mousewheel)
+        right.bind("<Enter>", self._enable_right_mousewheel)
+        right.bind("<Leave>", self._disable_right_mousewheel)
+
+        right.columnconfigure(0, weight=1)
+
+        ttk.Label(right, text="Methode de prediction", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         method_box = ttk.Frame(right, style="Panel.TFrame")
         method_box.grid(row=1, column=0, sticky="ew", pady=(8, 16))
         ttk.Radiobutton(method_box, text=METHOD_RULES, value=METHOD_RULES, variable=self.method_var).grid(
-            row=0, column=0, sticky="w", pady=2
+            row=0, column=0, sticky="w", padx=8, pady=(8, 2)
         )
         ttk.Radiobutton(method_box, text=METHOD_SVM, value=METHOD_SVM, variable=self.method_var).grid(
-            row=1, column=0, sticky="w", pady=2
+            row=1, column=0, sticky="w", padx=8, pady=2
         )
         ttk.Checkbutton(
             method_box,
-            text="Analyse semi temps réel avec la caméra",
+            text="Analyse semi temps reel avec la camera",
             variable=self.predict_live,
-        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ).grid(row=2, column=0, sticky="w", padx=8, pady=(8, 8))
 
+        ttk.Label(right, text="Actions", style="Section.TLabel").grid(row=2, column=0, sticky="w")
         action_box = ttk.Frame(right, style="Panel.TFrame")
-        action_box.grid(row=2, column=0, sticky="ew", pady=(0, 16))
-        action_box.columnconfigure(0, weight=1)
-        ttk.Button(action_box, text="Lancer la prédiction", command=self.run_prediction).grid(
-            row=0, column=0, sticky="ew"
+        action_box.grid(row=3, column=0, sticky="ew", pady=(8, 18))
+        for column in range(2):
+            action_box.columnconfigure(column, weight=1)
+
+        ttk.Button(action_box, text="Importer image", command=self.import_image).grid(
+            row=0, column=0, sticky="ew", padx=(8, 5), pady=(8, 6)
+        )
+        ttk.Button(action_box, text="Ouvrir camera", command=self.start_camera).grid(
+            row=0, column=1, sticky="ew", padx=(5, 8), pady=(8, 6)
+        )
+        ttk.Button(action_box, text="Capturer", command=self.capture_camera_frame).grid(
+            row=1, column=0, sticky="ew", padx=(8, 5), pady=(0, 6)
+        )
+        ttk.Button(action_box, text="Arreter camera", style="Danger.TButton", command=self.stop_camera).grid(
+            row=1, column=1, sticky="ew", padx=(5, 8), pady=(0, 6)
+        )
+        ttk.Button(action_box, text="Lancer la prediction", style="Primary.TButton", command=self.run_prediction).grid(
+            row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(2, 6)
+        )
+        ttk.Button(action_box, text="Reinitialiser", command=self.reset).grid(
+            row=3, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 8)
         )
 
-        ttk.Label(right, text="Résultat", style="Section.TLabel").grid(row=3, column=0, sticky="w")
-        result_box = ttk.Frame(right, style="Panel.TFrame", padding=12)
-        result_box.grid(row=4, column=0, sticky="ew", pady=(8, 16))
+        ttk.Label(right, text="Decision de controle", style="Section.TLabel").grid(row=6, column=0, sticky="w")
+        result_box = tk.Frame(
+            right,
+            background=COLOR_CARD_NEUTRAL,
+            highlightbackground=COLOR_BORDER,
+            highlightthickness=2,
+            padx=18,
+            pady=16,
+        )
+        result_box.grid(row=7, column=0, sticky="ew", pady=(8, 18))
         result_box.columnconfigure(0, weight=1)
-        ttk.Label(result_box, textvariable=self.prediction_var, style="Result.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(result_box, textvariable=self.confidence_var, style="Panel.TLabel").grid(row=1, column=0, sticky="w")
-        ttk.Label(result_box, textvariable=self.source_var, style="Panel.TLabel").grid(row=2, column=0, sticky="w")
 
-        ttk.Label(right, text="Statistiques utiles", style="Section.TLabel").grid(row=5, column=0, sticky="nw")
+        self.result_box = result_box
+        self.result_badge = tk.Label(
+            result_box,
+            text="EN ATTENTE",
+            background="#27364a",
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 10, "bold"),
+            padx=12,
+            pady=4,
+        )
+        self.result_badge.grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+        self.prediction_label = tk.Label(
+            result_box,
+            textvariable=self.prediction_var,
+            background=COLOR_CARD_NEUTRAL,
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 28, "bold"),
+            anchor="w",
+        )
+        self.prediction_label.grid(row=1, column=0, sticky="ew")
+
+        self.confidence_label = tk.Label(
+            result_box,
+            textvariable=self.confidence_var,
+            background=COLOR_CARD_NEUTRAL,
+            foreground=COLOR_MUTED,
+            font=("Segoe UI", 11, "bold"),
+            anchor="w",
+        )
+        self.confidence_label.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+
+        self.validation_label = tk.Label(
+            result_box,
+            textvariable=self.validation_var,
+            background=COLOR_CARD_NEUTRAL,
+            foreground=COLOR_MUTED,
+            font=("Segoe UI", 11, "bold"),
+            anchor="w",
+        )
+        self.validation_label.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+
+        self.source_label = tk.Label(
+            result_box,
+            textvariable=self.source_var,
+            background=COLOR_CARD_NEUTRAL,
+            foreground=COLOR_MUTED,
+            font=("Segoe UI", 10),
+            anchor="w",
+        )
+        self.source_label.grid(row=4, column=0, sticky="ew", pady=(2, 0))
+
+        self.summary_label = tk.Label(
+            result_box,
+            textvariable=self.summary_var,
+            background=COLOR_CARD_NEUTRAL,
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 11),
+            anchor="w",
+            justify="left",
+            wraplength=420,
+        )
+        self.summary_label.grid(row=5, column=0, sticky="ew", pady=(12, 0))
+
+        ttk.Label(right, text="Indicateurs / statistiques", style="Section.TLabel").grid(row=8, column=0, sticky="nw")
         stats_frame = ttk.Frame(right, style="Panel.TFrame")
-        stats_frame.grid(row=6, column=0, sticky="nsew", pady=(8, 0))
+        stats_frame.grid(row=9, column=0, sticky="ew", pady=(8, 18))
         stats_frame.columnconfigure(0, weight=1)
         stats_frame.rowconfigure(0, weight=1)
 
         self.stats_text = tk.Text(
             stats_frame,
-            height=18,
+            height=10,
             wrap="word",
             relief="flat",
             borderwidth=0,
-            background="#ffffff",
-            foreground="#1f2933",
+            background=COLOR_INPUT,
+            foreground=COLOR_TEXT,
+            insertbackground=COLOR_TEXT,
             font=("Consolas", 10),
         )
-        self.stats_text.grid(row=0, column=0, sticky="nsew")
+        self.stats_text.grid(row=0, column=0, sticky="ew", padx=(8, 0), pady=8)
         scrollbar = ttk.Scrollbar(stats_frame, orient="vertical", command=self.stats_text.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
+        scrollbar.grid(row=0, column=1, sticky="ns", pady=8, padx=(0, 8))
         self.stats_text.configure(yscrollcommand=scrollbar.set)
-        self._write_stats("Aucune analyse lancée.")
+        self._write_stats("Aucune analyse lancee.")
+
+        ttk.Label(right, text="Vues du pipeline", style="Section.TLabel").grid(row=10, column=0, sticky="w")
+        pipeline_box = ttk.Frame(right, style="Panel.TFrame")
+        pipeline_box.grid(row=11, column=0, sticky="ew", pady=(8, 12))
+        for column in range(2):
+            pipeline_box.columnconfigure(column, weight=1)
+
+        pipeline_buttons = [
+            (VIEW_ORIGINAL, 0, 0),
+            (VIEW_CONTRAST, 0, 1),
+            (VIEW_THRESHOLD, 1, 0),
+            (VIEW_SEGMENTATION, 1, 1),
+            (VIEW_CONTOURS, 2, 0),
+            (VIEW_SUSPECT_ZONES, 2, 1),
+            (VIEW_FEATURES, 3, 0),
+        ]
+        for view_key, row, column in pipeline_buttons:
+            colspan = 2 if view_key == VIEW_FEATURES else 1
+            ttk.Button(
+                pipeline_box,
+                text=VIEW_TITLES[view_key],
+                style="Pipeline.TButton",
+                command=lambda key=view_key: self.open_pipeline_view(key),
+            ).grid(row=row, column=column, columnspan=colspan, sticky="ew", padx=8, pady=5)
+
+    def _resize_right_canvas_content(self, event: tk.Event) -> None:
+        self.right_canvas.itemconfigure(self.right_canvas_window, width=event.width)
+
+    def _update_right_scroll_region(self, _event: tk.Event) -> None:
+        self.right_canvas.configure(scrollregion=self.right_canvas.bbox("all"))
+
+    def _enable_right_mousewheel(self, _event: tk.Event) -> None:
+        self.bind_all("<MouseWheel>", self._on_right_mousewheel)
+
+    def _disable_right_mousewheel(self, _event: tk.Event) -> None:
+        self.unbind_all("<MouseWheel>")
+
+    def _on_right_mousewheel(self, event: tk.Event) -> None:
+        delta = int(-1 * (event.delta / 120))
+        self.right_canvas.yview_scroll(delta, "units")
 
     def import_image(self) -> None:
         path = filedialog.askopenfilename(
-            title="Sélectionner une image",
+            title="Selectionner une image",
             filetypes=[
                 ("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"),
                 ("Tous les fichiers", "*.*"),
@@ -191,9 +412,10 @@ class DefectDetectionApp(tk.Tk):
         self.stop_camera()
         self.current_image = image
         self.current_image_path = Path(path)
-        self.source_var.set(f"Source : image importée - {self.current_image_path.name}")
-        self.status_var.set("Image importée. Lancez la prédiction.")
+        self.source_var.set(f"Source : image importee - {self.current_image_path.name}")
+        self.status_var.set("Image importee. Lancez la prediction ou ouvrez une vue du pipeline.")
         self._show_image(image)
+        self._refresh_pipeline_windows(include_stats=VIEW_FEATURES in self.pipeline_windows)
 
     def start_camera(self) -> None:
         if self.camera_running:
@@ -201,15 +423,15 @@ class DefectDetectionApp(tk.Tk):
 
         camera = cv2.VideoCapture(0)
         if not camera.isOpened():
-            messagebox.showerror("Caméra indisponible", "Impossible d'ouvrir la caméra du PC.")
+            messagebox.showerror("Camera indisponible", "Impossible d'ouvrir la camera du PC.")
             camera.release()
             return
 
         self.camera = camera
         self.camera_running = True
         self.current_image_path = None
-        self.source_var.set("Source : caméra PC")
-        self.status_var.set("Caméra ouverte.")
+        self.source_var.set("Source : camera PC")
+        self.status_var.set("Camera ouverte.")
         self._update_camera_frame()
 
     def stop_camera(self) -> None:
@@ -217,44 +439,94 @@ class DefectDetectionApp(tk.Tk):
         if self.camera is not None:
             self.camera.release()
             self.camera = None
-        self.status_var.set("Caméra arrêtée.")
+        self.status_var.set("Camera arretee.")
 
     def capture_camera_frame(self) -> None:
         if self.current_image is None:
-            messagebox.showwarning("Aucune image", "Aucune frame caméra disponible à capturer.")
+            messagebox.showwarning("Aucune image", "Aucune frame camera disponible a capturer.")
             return
         self.stop_camera()
-        self.source_var.set("Source : capture caméra")
-        self.status_var.set("Frame capturée. Lancez la prédiction.")
+        self.source_var.set("Source : capture camera")
+        self.status_var.set("Frame capturee. Lancez la prediction.")
         self._show_image(self.current_image)
+        self._refresh_pipeline_windows(include_stats=True)
 
     def run_prediction(self) -> None:
         if self.current_image is None:
-            messagebox.showwarning("Aucune image", "Importez une image ou ouvrez la caméra avant de lancer l'analyse.")
+            messagebox.showwarning("Aucune image", "Importez une image ou ouvrez la camera avant de lancer l'analyse.")
             return
 
         method = self.method_var.get()
         try:
             result = predict_image(self.current_image, method)
         except Exception as exc:  # message utilisateur propre pour dependances/modeles manquants
-            messagebox.showerror("Erreur de prédiction", str(exc))
-            self.status_var.set("Erreur pendant la prédiction.")
+            messagebox.showerror("Erreur de prediction", str(exc))
+            self.status_var.set("Erreur pendant la prediction.")
             return
 
         self._display_result(result)
-        self.status_var.set("Prédiction terminée.")
+        self._refresh_pipeline_windows(include_stats=True)
+        self.status_var.set("Prediction terminee.")
 
     def reset(self) -> None:
         self.stop_camera()
         self.current_image = None
         self.current_image_path = None
-        self.preview_label.configure(image="", text="Aucune image chargée")
+        self.pipeline_visualization = None
+        self.preview_label.configure(image="", text="Aucune image chargee")
         self._photo_ref = None
-        self.prediction_var.set("Aucune prédiction")
+        self.prediction_var.set("Aucune prediction")
         self.confidence_var.set("Score non disponible")
-        self.source_var.set("Aucune source")
-        self._write_stats("Aucune analyse lancée.")
-        self.status_var.set("Interface réinitialisée.")
+        self.validation_var.set("Statut validation : non analyse")
+        self.summary_var.set("Resume : aucune analyse lancee.")
+        self.source_var.set("Source : aucune")
+        self._set_result_card("neutral")
+        self._write_stats("Aucune analyse lancee.")
+        self._close_pipeline_windows()
+        self.status_var.set("Interface reinitialisee.")
+
+    def open_pipeline_view(self, view_key: str) -> None:
+        if self.current_image is None:
+            messagebox.showwarning("Aucune image", "Chargez une image ou ouvrez la camera avant d'afficher le pipeline.")
+            return
+
+        self._update_pipeline_cache(include_stats=view_key == VIEW_FEATURES)
+
+        existing = self.pipeline_windows.get(view_key)
+        if existing is not None and existing.winfo_exists():
+            self._update_pipeline_window(view_key)
+            existing.lift()
+            existing.focus_force()
+            return
+
+        window = tk.Toplevel(self)
+        window.title(VIEW_TITLES[view_key])
+        window.configure(background=COLOR_BG)
+        window.minsize(520, 420)
+        window.protocol("WM_DELETE_WINDOW", lambda key=view_key: self._close_pipeline_window(key))
+        self.pipeline_windows[view_key] = window
+
+        ttk.Label(window, text=VIEW_TITLES[view_key], style="Title.TLabel").pack(anchor="w", padx=16, pady=(14, 8))
+
+        if view_key == VIEW_FEATURES:
+            text = tk.Text(
+                window,
+                wrap="word",
+                relief="flat",
+                borderwidth=0,
+                background="#0b1220",
+                foreground=COLOR_TEXT,
+                insertbackground=COLOR_TEXT,
+                font=("Consolas", 10),
+            )
+            text.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+            self.pipeline_text_widgets[view_key] = text
+        else:
+            label = tk.Label(window, background="#060b12", foreground=COLOR_MUTED)
+            label.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+            self.pipeline_image_labels[view_key] = label
+
+        self._update_pipeline_window(view_key)
 
     def _update_camera_frame(self) -> None:
         if not self.camera_running or self.camera is None:
@@ -263,21 +535,95 @@ class DefectDetectionApp(tk.Tk):
         ok, frame = self.camera.read()
         if not ok:
             self.stop_camera()
-            messagebox.showerror("Caméra", "Impossible de lire le flux caméra.")
+            messagebox.showerror("Camera", "Impossible de lire le flux camera.")
             return
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         self.current_image = gray
         self._show_image(gray)
 
-        now = self.tk.call("clock", "milliseconds")
-        if self.predict_live.get() and int(now) - self._last_live_prediction_ms > 1200:
-            self._last_live_prediction_ms = int(now)
+        now = int(self.tk.call("clock", "milliseconds"))
+        if self.pipeline_windows and now - self._last_pipeline_update_ms > 180:
+            self._last_pipeline_update_ms = now
+            self._refresh_pipeline_windows(include_stats=VIEW_FEATURES in self.pipeline_windows)
+
+        if self.predict_live.get() and now - self._last_live_prediction_ms > 1200:
+            self._last_live_prediction_ms = now
             self.run_prediction()
 
         self.after(30, self._update_camera_frame)
 
+    def _update_pipeline_cache(self, include_stats: bool = False) -> bool:
+        if self.current_image is None:
+            return False
+        try:
+            self.pipeline_visualization = build_pipeline_visualization(self.current_image, include_stats=include_stats)
+        except Exception as exc:
+            self.status_var.set(f"Erreur pipeline : {exc}")
+            return False
+        return True
+
+    def _refresh_pipeline_windows(self, include_stats: bool = False) -> None:
+        if not self.pipeline_windows or self.current_image is None:
+            return
+        if not self._update_pipeline_cache(include_stats=include_stats):
+            return
+        for view_key in list(self.pipeline_windows):
+            self._update_pipeline_window(view_key)
+
+    def _update_pipeline_window(self, view_key: str) -> None:
+        if self.pipeline_visualization is None:
+            return
+
+        window = self.pipeline_windows.get(view_key)
+        if window is None or not window.winfo_exists():
+            self._close_pipeline_window(view_key)
+            return
+
+        if view_key == VIEW_FEATURES:
+            if not self.pipeline_visualization.stats and self.current_image is not None:
+                self._update_pipeline_cache(include_stats=True)
+            text = self.pipeline_text_widgets.get(view_key)
+            if text is None:
+                return
+            content = format_pipeline_statistics(self.pipeline_visualization.stats)
+            text.configure(state="normal")
+            text.delete("1.0", "end")
+            text.insert("1.0", content)
+            text.configure(state="disabled")
+            return
+
+        image = self.pipeline_visualization.images.get(view_key)
+        label = self.pipeline_image_labels.get(view_key)
+        if image is None or label is None:
+            return
+
+        photo = self._image_to_photo(image, PIPELINE_PREVIEW_SIZE, background=(6, 11, 18))
+        self.pipeline_photo_refs[view_key] = photo
+        label.configure(image=photo, text="")
+
+    def _close_pipeline_window(self, view_key: str) -> None:
+        window = self.pipeline_windows.pop(view_key, None)
+        self.pipeline_image_labels.pop(view_key, None)
+        self.pipeline_text_widgets.pop(view_key, None)
+        self.pipeline_photo_refs.pop(view_key, None)
+        if window is not None and window.winfo_exists():
+            window.destroy()
+
+    def _close_pipeline_windows(self) -> None:
+        for view_key in list(self.pipeline_windows):
+            self._close_pipeline_window(view_key)
+
     def _show_image(self, image: np.ndarray) -> None:
+        self._photo_ref = self._image_to_photo(image, PREVIEW_SIZE, background=(6, 11, 18))
+        self.preview_label.configure(image=self._photo_ref, text="")
+
+    def _image_to_photo(
+        self,
+        image: np.ndarray,
+        size: tuple[int, int],
+        background: tuple[int, int, int],
+    ) -> ImageTk.PhotoImage:
         if image.ndim == 2:
             rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         else:
@@ -285,25 +631,54 @@ class DefectDetectionApp(tk.Tk):
 
         pil_image = Image.fromarray(rgb)
         resample_filter = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
-        pil_image.thumbnail(PREVIEW_SIZE, resample_filter)
+        pil_image.thumbnail(size, resample_filter)
 
-        canvas = Image.new("RGB", PREVIEW_SIZE, color=(245, 246, 248))
-        offset = ((PREVIEW_SIZE[0] - pil_image.width) // 2, (PREVIEW_SIZE[1] - pil_image.height) // 2)
+        canvas = Image.new("RGB", size, color=background)
+        offset = ((size[0] - pil_image.width) // 2, (size[1] - pil_image.height) // 2)
         canvas.paste(pil_image, offset)
-
-        self._photo_ref = ImageTk.PhotoImage(canvas)
-        self.preview_label.configure(image=self._photo_ref, text="")
+        return ImageTk.PhotoImage(canvas)
 
     def _display_result(self, result: PredictionResult) -> None:
-        self.prediction_var.set(f"Classe prédite : {result.predicted_name}")
         self.confidence_var.set(result.confidence_label or "Score non disponible")
+        self.summary_var.set(f"Resume : {result.summary}")
+
+        if result.predicted_label == INVALID_LABEL:
+            self.prediction_var.set("Image non valide")
+            self.validation_var.set("Statut validation : Image non valide")
+            self._set_result_card("invalid")
+        else:
+            self.validation_var.set("Statut validation : Piece detectee")
+            if result.predicted_name == "Defective":
+                self.prediction_var.set("Piece defectueuse")
+                self._set_result_card("defective")
+            else:
+                self.prediction_var.set("Piece OK")
+                self._set_result_card("ok")
+
         self._write_stats(self._format_stats(result))
+
+    def _set_result_card(self, state: str) -> None:
+        card_styles = {
+            "neutral": (COLOR_CARD_NEUTRAL, COLOR_TEXT, "#27364a", "SYSTEME PRET"),
+            "ok": (COLOR_CARD_OK, COLOR_OK, "#047857", "CONTROLE VALIDE"),
+            "defective": (COLOR_CARD_DEFECT, COLOR_DEFECT, "#b91c1c", "ALERTE QUALITE"),
+            "invalid": (COLOR_CARD_INVALID, COLOR_WARNING, "#b45309", "! IMAGE NON VALIDE"),
+        }
+        background, accent, badge_bg, badge_text = card_styles.get(state, card_styles["neutral"])
+
+        self.result_box.configure(background=background, highlightbackground=accent)
+        self.result_badge.configure(text=badge_text, background=badge_bg, foreground=COLOR_TEXT)
+        self.prediction_label.configure(background=background, foreground=accent)
+        self.confidence_label.configure(background=background, foreground=COLOR_MUTED)
+        self.validation_label.configure(background=background, foreground=accent)
+        self.source_label.configure(background=background, foreground=COLOR_MUTED)
+        self.summary_label.configure(background=background, foreground=COLOR_TEXT)
 
     def _format_stats(self, result: PredictionResult) -> str:
         lines = [
-            f"Méthode : {result.method}",
-            f"Classe prédite : {result.predicted_name}",
-            f"Résumé : {result.summary}",
+            f"Methode : {result.method}",
+            f"Classe predite : {result.predicted_name}",
+            f"Resume : {result.summary}",
             "",
             "Statistiques :",
         ]
@@ -326,6 +701,7 @@ class DefectDetectionApp(tk.Tk):
 
     def on_close(self) -> None:
         self.stop_camera()
+        self._close_pipeline_windows()
         self.destroy()
 
 

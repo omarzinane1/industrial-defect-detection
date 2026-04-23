@@ -20,6 +20,9 @@ from .utils import FEATURES_DIR, LABEL_TO_NAME, MODELS_DIR
 
 METHOD_RULES = "Traitement d'image + règles"
 METHOD_SVM = "Traitement d'image + SVM"
+INVALID_LABEL = -1
+INVALID_NAME = "Image non valide"
+INVALID_SUMMARY = "Aucune pièce industrielle détectée dans l'image."
 
 
 @dataclass
@@ -32,6 +35,131 @@ class PredictionResult:
     summary: str
     stats: dict[str, Any]
     confidence_label: str | None = None
+
+
+def _select_main_circle(processed_image: np.ndarray) -> tuple[int, int, int] | None:
+    """Detecte la piece principale comme un grand cercle centré."""
+    circles = cv2.HoughCircles(
+        processed_image,
+        cv2.HOUGH_GRADIENT,
+        dp=1.2,
+        minDist=80,
+        param1=80,
+        param2=30,
+        minRadius=60,
+        maxRadius=150,
+    )
+    if circles is None:
+        return None
+
+    height, width = processed_image.shape
+    best_circle: tuple[int, int, int] | None = None
+    best_score: tuple[float, float] | None = None
+
+    for x, y, radius in np.round(circles[0]).astype(int):
+        center_offset = float(np.hypot(x - width / 2, y - height / 2) / min(height, width))
+        score = (center_offset, -float(radius))
+        if best_score is None or score < best_score:
+            best_score = score
+            best_circle = (int(x), int(y), int(radius))
+
+    return best_circle
+
+
+def _validate_industrial_piece(image: np.ndarray) -> tuple[bool, dict[str, Any]]:
+    """Valide qu'une vraie piece industrielle principale est visible avant prediction.
+
+    La validation reste volontairement simple :
+    - une grande piece circulaire doit etre detectee ;
+    - son rayon doit etre coherent ;
+    - elle doit etre suffisamment centree ;
+    - sa surface doit etre raisonnable ;
+    - son contour principal doit ressembler a une vraie piece plutot qu'a du bruit.
+    """
+    processed = preprocess_image(image)
+    circle = _select_main_circle(processed)
+    if circle is None:
+        return False, {
+            "validation entrée": "échec",
+            "raison validation": "aucune pièce circulaire principale détectée",
+        }
+
+    x, y, radius = circle
+    height, width = processed.shape
+    image_area = float(height * width)
+    min_dim = float(min(height, width))
+
+    radius_ratio = float(radius / min_dim)
+    center_offset_ratio = float(np.hypot(x - width / 2, y - height / 2) / min_dim)
+    circle_area_ratio = float(np.pi * (radius**2) / image_area)
+
+    yy, xx = np.ogrid[:height, :width]
+    distance = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
+    inner_mask = distance <= radius * 0.90
+    outer_mask = (distance >= radius * 1.05) & (distance <= min_dim / 2)
+    ring_mask = (distance >= radius * 0.90) & (distance <= radius * 1.10)
+
+    inside_mean = float(processed[inner_mask].mean())
+    outside_mean = float(processed[outer_mask].mean()) if np.any(outer_mask) else 0.0
+    contrast_abs = float(abs(inside_mean - outside_mean))
+
+    edges = canny_edges(processed)
+    ring_edge_density = float(np.count_nonzero(edges[ring_mask]) / max(1, int(np.count_nonzero(ring_mask))))
+
+    _, bright_mask = cv2.threshold(processed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask_area_ratio = float(np.count_nonzero(bright_mask[inner_mask]) / image_area)
+
+    is_valid = (
+        0.22 <= radius_ratio <= 0.50
+        and center_offset_ratio <= 0.12
+        and 0.15 <= circle_area_ratio <= 0.70
+        and 0.10 <= mask_area_ratio <= 0.55
+        and contrast_abs >= 4.0
+        and 0.02 <= ring_edge_density <= 0.28
+    )
+
+    stats = {
+        "validation entrée": "succès" if is_valid else "échec",
+        "centre cercle x": x,
+        "centre cercle y": y,
+        "rayon pièce": radius,
+        "rayon ratio": radius_ratio,
+        "centrage ratio": center_offset_ratio,
+        "surface pièce ratio": circle_area_ratio,
+        "surface masque ratio": mask_area_ratio,
+        "contraste intérieur/extérieur": contrast_abs,
+        "densité contour circulaire": ring_edge_density,
+    }
+
+    if not is_valid:
+        reasons: list[str] = []
+        if not (0.22 <= radius_ratio <= 0.50):
+            reasons.append("rayon incohérent")
+        if center_offset_ratio > 0.12:
+            reasons.append("pièce trop décentrée")
+        if not (0.15 <= circle_area_ratio <= 0.70):
+            reasons.append("surface détectée incohérente")
+        if not (0.10 <= mask_area_ratio <= 0.55):
+            reasons.append("masque principal incohérent")
+        if contrast_abs < 4.0:
+            reasons.append("contraste pièce/fond insuffisant")
+        if not (0.02 <= ring_edge_density <= 0.28):
+            reasons.append("contour circulaire non crédible")
+        stats["raison validation"] = ", ".join(reasons) if reasons else "validation échouée"
+
+    return is_valid, stats
+
+
+def _invalid_prediction(method: str, validation_stats: dict[str, Any]) -> PredictionResult:
+    """Construit la reponse standard pour une image hors domaine."""
+    return PredictionResult(
+        method=method,
+        predicted_label=INVALID_LABEL,
+        predicted_name=INVALID_NAME,
+        summary=INVALID_SUMMARY,
+        stats=validation_stats,
+        confidence_label="Validation entrée : échec",
+    )
 
 
 @lru_cache(maxsize=1)
@@ -201,6 +329,10 @@ def predict_with_svm(image: np.ndarray, model: Any | None = None) -> PredictionR
 
 def predict_image(image: np.ndarray, method: str) -> PredictionResult:
     """Point d'entree unique pour predire une image deja chargee."""
+    is_valid, validation_stats = _validate_industrial_piece(image)
+    if not is_valid:
+        return _invalid_prediction(method, validation_stats)
+
     if method == METHOD_RULES:
         return predict_with_rules(image)
     if method == METHOD_SVM:
