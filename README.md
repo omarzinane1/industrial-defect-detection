@@ -2,38 +2,40 @@
 
 ## Contexte
 
-Ce projet porte sur la detection automatique de defauts sur des pieces de fonderie a partir d'images en niveaux de gris. Les images sont vues de dessus et appartiennent a deux classes :
+Ce projet porte sur la detection automatique de defauts industriels a partir d'images en niveaux de gris de pieces de fonderie vues de dessus. Les images appartiennent a deux classes :
 
-- `OK` : piece correcte
+- `OK` : piece consideree comme correcte
 - `Defective` : piece presentant un defaut visible
 
-L'objectif est de construire un projet clair, progressif et exploitable, en comparant deux approches :
+L'objectif est de construire un projet complet, progressif et compréhensible, en comparant deux approches sur le meme dataset :
 
 - une approche classique de traitement d'image avec decision par regles ;
-- une approche de Machine Learning classique basee sur SVM.
+- une approche de Machine Learning classique avec SVM.
 
-Le projet contient aussi une interface Tkinter pour tester les predictions sur image importee ou via la camera du PC.
+Le projet contient aussi une interface Tkinter permettant de tester les predictions sur image importee ou via la camera du PC.
 
 ## Problematique
 
-Dans un contexte industriel, l'inspection visuelle manuelle peut etre lente, repetitive et sensible a la fatigue. Ce projet cherche donc a automatiser une partie du controle qualite avec une logique simple et pedagogique :
+Dans un contexte industriel, l'inspection visuelle manuelle peut etre lente, repetitive et sensible a la fatigue. L'idee du projet est donc de proposer une chaine simple et pedagogique qui permet de passer :
 
-1. charger les images ;
-2. les pretraiter ;
-3. isoler des zones suspectes ;
-4. extraire des mesures utiles ;
-5. prendre une decision finale.
+1. d'une image brute ;
+2. a une image pretraitee ;
+3. a une segmentation des zones suspectes ;
+4. a des mesures numeriques ;
+5. a une decision finale.
+
+L'objectif n'est pas d'utiliser une solution inutilement complexe, mais de comprendre clairement les etapes d'un pipeline de vision par ordinateur applique a un cas industriel.
 
 ## Objectifs
 
 Les objectifs principaux sont :
 
-- visualiser et comprendre le dataset ;
-- construire un pipeline simple de traitement d'image ;
+- charger et visualiser le dataset ;
+- appliquer des techniques simples de pretraitement ;
 - segmenter les zones suspectes ;
-- extraire des caracteristiques interpretable ;
-- implementer une approche par regles ;
-- entrainer un modele SVM ;
+- construire une decision par regles interpretable ;
+- extraire des caracteristiques pour un modele SVM ;
+- entrainer et evaluer le modele ;
 - comparer les deux approches ;
 - proposer une interface desktop simple pour les tests ;
 - ajouter un controle de stabilite camera avec Lucas-Kanade.
@@ -44,12 +46,12 @@ Le dataset doit etre place dans le dossier suivant :
 
 ```text
 data/raw/casting_data/
-├── train/
-│   ├── ok_front/
-│   └── def_front/
-└── test/
-    ├── ok_front/
-    └── def_front/
+|-- train/
+|   |-- ok_front/
+|   `-- def_front/
+`-- test/
+    |-- ok_front/
+    `-- def_front/
 ```
 
 Le code lit automatiquement cette structure.
@@ -63,41 +65,41 @@ Labels utilises :
 
 ```text
 industrial-defect-detection/
-├── data/
-│   ├── raw/
-│   │   └── casting_data/
-│   ├── processed/
-│   └── features/
-├── notebooks/
-│   ├── 01_visualisation_dataset.ipynb
-│   ├── 02_pretraitement_filtrage.ipynb
-│   ├── 03_contraste_seuillage_contours.ipynb
-│   ├── 04_segmentation_mesures.ipynb
-│   ├── 05_decision_par_regles.ipynb
-│   ├── 06_extraction_caracteristiques_ml.ipynb
-│   ├── 07_modele_svm.ipynb
-│   └── 08_comparaison_finale.ipynb
-├── src/
-│   ├── preprocessing.py
-│   ├── filtering.py
-│   ├── segmentation.py
-│   ├── features.py
-│   ├── rules.py
-│   ├── ml_models.py
-│   ├── motion.py
-│   ├── evaluation.py
-│   ├── inference.py
-│   ├── pipeline_visualization.py
-│   └── utils.py
-├── results/
-│   ├── figures/
-│   ├── metrics/
-│   └── models/
-├── README.md
-├── requirements.txt
-├── .gitignore
-├── app_tkinter.py
-└── main.py
+|-- data/
+|   |-- raw/
+|   |   `-- casting_data/
+|   |-- processed/
+|   `-- features/
+|-- notebooks/
+|   |-- 01_visualisation_dataset.ipynb
+|   |-- 02_pretraitement_filtrage.ipynb
+|   |-- 03_contraste_seuillage_contours.ipynb
+|   |-- 04_segmentation_mesures.ipynb
+|   |-- 05_decision_par_regles.ipynb
+|   |-- 06_extraction_caracteristiques_ml.ipynb
+|   |-- 07_modele_svm.ipynb
+|   `-- 08_comparaison_finale.ipynb
+|-- src/
+|   |-- preprocessing.py
+|   |-- filtering.py
+|   |-- segmentation.py
+|   |-- features.py
+|   |-- rules.py
+|   |-- ml_models.py
+|   |-- motion.py
+|   |-- evaluation.py
+|   |-- inference.py
+|   |-- pipeline_visualization.py
+|   `-- utils.py
+|-- results/
+|   |-- figures/
+|   |-- metrics/
+|   `-- models/
+|-- README.md
+|-- requirements.txt
+|-- .gitignore
+|-- app_tkinter.py
+`-- main.py
 ```
 
 ## Methodologie
@@ -129,42 +131,63 @@ Caracteristiques principales :
 - histogrammes de niveaux de gris ;
 - texture GLCM ;
 - texture LBP ;
-- mesures de segmentation.
+- mesures issues de la segmentation.
 
 Le pipeline SVM contient :
 
 1. preparation de `X` et `y` ;
 2. normalisation avec `StandardScaler` ;
 3. apprentissage avec un SVM RBF ;
-4. prediction sur le test ;
+4. prediction sur le jeu de test ;
 5. sauvegarde du modele et des metriques.
 
-### 3. Controle de stabilite camera avec Lucas-Kanade
+### 3. Estimation de mouvement avec Lucas-Kanade
 
-Une brique complementaire a ete ajoutee pour le mode camera. Elle ne remplace pas les predictions rules ou SVM. Elle sert uniquement a evaluer la stabilite de la scene avant l'analyse.
+Une troisieme brique a ete ajoutee, non pas pour remplacer la prediction, mais pour completer le mode camera.
 
-Cette brique repose sur OpenCV avec :
+Cette partie sert surtout a verifier si la scene est stable avant de lancer l'analyse. En pratique, cela permet d'eviter de predire sur une image en mouvement, floue ou mal capturee.
 
-- `cv2.goodFeaturesToTrack`
-- `cv2.calcOpticalFlowPyrLK`
+## Pourquoi avoir ajoute l'estimation de mouvement
 
-Le principe est simple :
+L'ajout de cette fonctionnalite repond a un besoin simple dans l'interface camera :
 
-1. conserver la frame precedente en grayscale ;
-2. detecter de bons points a suivre ;
-3. suivre ces points sur la frame suivante ;
-4. calculer les vecteurs de deplacement ;
-5. produire un score global de mouvement ;
-6. afficher un etat simple :
-   - `Stable`
-   - `En mouvement`
-   - `Instable`
+- savoir si la scene est stable ou en mouvement ;
+- ameliorer la qualite de capture avant la prediction ;
+- signaler a l'utilisateur quand la piece bouge trop ;
+- eviter une analyse sur une frame instable.
 
-Cette information est utile pour :
+Autrement dit, cette estimation ne sert pas a classer la piece en `OK` ou `Defective`, mais a dire si l'image camera est suffisamment fiable pour etre analysee dans de bonnes conditions.
 
-- verifier que la piece est stable devant la camera ;
-- ameliorer la qualite de capture ;
-- eviter une prediction automatique quand le mouvement est trop fort.
+## Pourquoi le choix de Lucas-Kanade
+
+J'ai choisi Lucas-Kanade parce que c'est une methode classique vue en cours, simple a comprendre et tres adaptee a ce type de besoin.
+
+Elle convient bien ici pour plusieurs raisons :
+
+- elle est adaptee aux petits mouvements ;
+- elle fonctionne sur des images successives ;
+- elle est efficace sur un flux webcam ;
+- elle est legere a executer ;
+- elle est plus naturelle a integrer dans ce projet que des methodes plus lourdes ou plus complexes.
+
+Dans ce projet, le but n'est pas de faire du suivi d'objet avance, mais d'obtenir une estimation robuste et lisible de la stabilite de la scene. Lucas-Kanade est donc un bon compromis entre simplicite, rapidite et coherence pedagogique.
+
+## Ou Lucas-Kanade intervient dans le projet
+
+L'estimation de mouvement intervient uniquement dans le mode camera de l'application Tkinter.
+
+Elle ne remplace pas la prediction. Elle sert comme :
+
+- information complementaire ;
+- controle de stabilite ;
+- aide a la capture.
+
+La prediction finale reste faite soit par :
+
+- `Traitement d'image + regles`
+- `Traitement d'image + SVM`
+
+Le role de Lucas-Kanade est donc de verifier si la capture est suffisamment stable avant d'autoriser ou de recommander l'analyse.
 
 ## Technologies utilisees
 
@@ -181,7 +204,7 @@ Cette information est utile pour :
 - Jupyter
 - Tkinter
 
-Aucun deep learning n'est utilise.
+Aucun modele de deep learning n'est utilise.
 
 ## Installation
 
@@ -244,43 +267,37 @@ L'application se lance avec :
 python app_tkinter.py
 ```
 
-Fonctionnalites principales :
+### Ce que l'interface permet deja
 
-- choix explicite entre `Traitement d'image + regles` et `Traitement d'image + SVM`
-- import d'image depuis le PC
-- ouverture de la camera du PC
-- capture d'une frame camera
-- prediction sur l'image courante
-- affichage des statistiques utiles
-- vues secondaires du pipeline
-- controle de stabilite camera par Lucas-Kanade
+L'application permet :
 
-### Informations affichees
+- de choisir explicitement entre `Traitement d'image + regles` et `Traitement d'image + SVM` ;
+- d'importer une image depuis le PC ;
+- d'ouvrir la camera du PC ;
+- de capturer une frame camera ;
+- de lancer une prediction sur l'image courante ;
+- d'afficher la prediction finale et les statistiques utiles ;
+- d'ouvrir des vues secondaires du pipeline.
 
-L'interface affiche notamment :
+### Ce que l'interface affiche maintenant avec Lucas-Kanade
 
-- la methode choisie ;
-- la source utilisee ;
-- la decision finale ;
-- le score ou la confiance si disponible ;
-- le statut de validation de l'image ;
-- des statistiques liees a la prediction ;
-- l'etat du mouvement en mode camera ;
+En mode camera, l'interface peut maintenant afficher :
+
+- l'etat du mouvement : `Stable`, `En mouvement`, `Instable` ;
 - le score de mouvement ;
 - le nombre de points suivis ;
-- le deplacement moyen ;
-- un message de stabilite.
+- l'amplitude moyenne du deplacement ;
+- un indicateur de qualite de capture ;
+- un message indiquant si la capture est bonne ou non avant l'analyse.
 
-### Role de Lucas-Kanade dans l'interface
+### Comment cela s'integre
 
-Le suivi Lucas-Kanade est actif surtout pour le flux camera.
-
-Il sert a :
+Le suivi Lucas-Kanade est actif surtout sur le flux camera. Il sert a :
 
 - detecter si la scene est stable ;
 - informer l'utilisateur si la piece bouge trop ;
-- faciliter une meilleure capture avant prediction ;
-- limiter la prediction automatique en mode semi temps reel lorsque la scene est instable.
+- aider a obtenir une meilleure capture ;
+- limiter la prediction automatique quand la scene est instable.
 
 Quand le mouvement est trop fort, l'application affiche un message du type :
 
@@ -288,14 +305,31 @@ Quand le mouvement est trop fort, l'application affiche un message du type :
 Stabilisez la piece avant l'analyse.
 ```
 
-### Tester le mouvement camera
+## Comment utiliser la nouvelle partie Lucas-Kanade
 
-1. lancer `python app_tkinter.py`
-2. ouvrir la camera ;
-3. observer le panneau de stabilite ;
-4. laisser la scene immobile pour obtenir `Stable` ;
-5. bouger fortement la camera ou la piece pour observer `En mouvement` ou `Instable` ;
-6. revenir a une scene calme avant de lancer la prediction.
+1. lancer l'application :
+
+```bash
+python app_tkinter.py
+```
+
+2. choisir la methode de prediction ;
+3. ouvrir la camera ;
+4. observer l'etat du mouvement dans le panneau de droite ;
+5. stabiliser la piece si necessaire ;
+6. lancer ensuite la prediction.
+
+En pratique, cette etape sert de controle avant analyse. Une scene stable donne une capture plus propre et donc une prediction plus fiable.
+
+## Fichiers ajoutes ou modifies
+
+Cette partie du projet repose surtout sur les fichiers suivants :
+
+- `src/motion.py` : nouveau module dedie a l'estimation de mouvement par Lucas-Kanade ;
+- `app_tkinter.py` : integration du suivi de mouvement dans le mode camera et affichage des informations dans l'interface ;
+- `README.md` : documentation mise a jour pour expliquer cette nouvelle fonctionnalite.
+
+Les autres fichiers de prediction ne changent pas dans leur logique metier.
 
 ## Description des notebooks
 
@@ -359,7 +393,7 @@ Preparation de `X` et `y`, creation du pipeline SVM, entrainement, chargement et
 
 ### motion.py
 
-Estimation de mouvement par Lucas-Kanade pour le flux camera :
+Ce module contient l'estimation de mouvement par Lucas-Kanade pour le flux camera :
 
 - preparation des frames grayscale ;
 - detection de points a suivre ;
@@ -429,16 +463,17 @@ Limites :
 
 Avantages :
 
-- coherent avec un cours de vision par ordinateur ;
-- adapte au flux webcam ;
+- coherent avec le contenu du cours ;
+- adapte aux petits mouvements ;
+- efficace sur un flux webcam ;
 - simple a integrer avec OpenCV ;
-- utile pour filtrer les captures instables.
+- utile pour mieux controler la capture.
 
 Limites :
 
 - depend de la presence de points d'interet ;
 - moins informatif si la scene est trop uniforme ;
-- ne remplace pas une vraie acquisition controlee en environnement industriel.
+- ne remplace pas une acquisition materielle parfaitement stable.
 
 ## Pistes d'amelioration
 
@@ -454,6 +489,6 @@ Limites :
 ```text
 Add Lucas-Kanade motion estimation module for camera stability
 Integrate camera motion status into Tkinter interface
-Gate live camera predictions with motion stability checks
-Document Lucas-Kanade stability control in README
+Gate live camera predictions with stability checks
+Document Lucas-Kanade integration in README
 ```
