@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from src.inference import INVALID_LABEL, METHOD_RULES, METHOD_SVM, PredictionResult, predict_image
+from src.motion import MotionEstimate, MotionEstimator
 from src.pipeline_visualization import (
     VIEW_CONTOURS,
     VIEW_CONTRAST,
@@ -63,9 +64,16 @@ class DefectDetectionApp(tk.Tk):
         self.confidence_var = tk.StringVar(value="Score non disponible")
         self.validation_var = tk.StringVar(value="Statut validation : non analyse")
         self.summary_var = tk.StringVar(value="Resume : aucune analyse lancee.")
+        self.motion_state_var = tk.StringVar(value="Etat du mouvement : hors camera")
+        self.motion_score_var = tk.StringVar(value="Score de mouvement : n/a")
+        self.motion_points_var = tk.StringVar(value="Points suivis : n/a")
+        self.motion_displacement_var = tk.StringVar(value="Deplacement moyen : n/a")
+        self.motion_quality_var = tk.StringVar(value="Qualite capture : n/a")
+        self.motion_message_var = tk.StringVar(value="Controle de stabilite disponible en mode camera.")
 
         self.current_image: np.ndarray | None = None
         self.current_image_path: Path | None = None
+        self.current_source_kind = "none"
         self.camera: cv2.VideoCapture | None = None
         self.camera_running = False
         self.predict_live = tk.BooleanVar(value=False)
@@ -78,9 +86,13 @@ class DefectDetectionApp(tk.Tk):
         self.pipeline_text_widgets: dict[str, tk.Text] = {}
         self.pipeline_photo_refs: dict[str, ImageTk.PhotoImage] = {}
         self.pipeline_visualization: PipelineVisualization | None = None
+        self.motion_estimator = MotionEstimator()
+        self.last_motion_estimate: MotionEstimate | None = None
 
         self._configure_style()
         self._build_layout()
+        self._set_result_card("neutral")
+        self._set_motion_card("off")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _configure_style(self) -> None:
@@ -254,6 +266,92 @@ class DefectDetectionApp(tk.Tk):
             row=3, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 8)
         )
 
+        ttk.Label(right, text="Controle de stabilite camera", style="Section.TLabel").grid(row=4, column=0, sticky="w")
+        motion_box = tk.Frame(
+            right,
+            background=COLOR_PANEL_ALT,
+            highlightbackground=COLOR_BORDER,
+            highlightthickness=1,
+            padx=14,
+            pady=12,
+        )
+        motion_box.grid(row=5, column=0, sticky="ew", pady=(8, 18))
+        motion_box.columnconfigure(0, weight=1)
+
+        self.motion_box = motion_box
+        self.motion_badge = tk.Label(
+            motion_box,
+            text="HORS CAMERA",
+            background="#27364a",
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 9, "bold"),
+            padx=10,
+            pady=3,
+        )
+        self.motion_badge.grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+        self.motion_state_label = tk.Label(
+            motion_box,
+            textvariable=self.motion_state_var,
+            background=COLOR_PANEL_ALT,
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 14, "bold"),
+            anchor="w",
+        )
+        self.motion_state_label.grid(row=1, column=0, sticky="ew")
+
+        self.motion_message_label = tk.Label(
+            motion_box,
+            textvariable=self.motion_message_var,
+            background=COLOR_PANEL_ALT,
+            foreground=COLOR_MUTED,
+            font=("Segoe UI", 10),
+            anchor="w",
+            justify="left",
+            wraplength=420,
+        )
+        self.motion_message_label.grid(row=2, column=0, sticky="ew", pady=(6, 10))
+
+        self.motion_score_label = tk.Label(
+            motion_box,
+            textvariable=self.motion_score_var,
+            background=COLOR_PANEL_ALT,
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 10),
+            anchor="w",
+        )
+        self.motion_score_label.grid(row=3, column=0, sticky="ew")
+
+        self.motion_points_label = tk.Label(
+            motion_box,
+            textvariable=self.motion_points_var,
+            background=COLOR_PANEL_ALT,
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 10),
+            anchor="w",
+        )
+        self.motion_points_label.grid(row=4, column=0, sticky="ew", pady=(2, 0))
+
+        self.motion_displacement_label = tk.Label(
+            motion_box,
+            textvariable=self.motion_displacement_var,
+            background=COLOR_PANEL_ALT,
+            foreground=COLOR_TEXT,
+            font=("Segoe UI", 10),
+            anchor="w",
+        )
+        self.motion_displacement_label.grid(row=5, column=0, sticky="ew", pady=(2, 0))
+
+        self.motion_quality_label = tk.Label(
+            motion_box,
+            textvariable=self.motion_quality_var,
+            background=COLOR_PANEL_ALT,
+            foreground=COLOR_MUTED,
+            font=("Segoe UI", 10, "bold"),
+            anchor="w",
+        )
+        self.motion_quality_label.grid(row=6, column=0, sticky="ew", pady=(8, 0))
+
         ttk.Label(right, text="Decision de controle", style="Section.TLabel").grid(row=6, column=0, sticky="w")
         result_box = tk.Frame(
             right,
@@ -393,6 +491,60 @@ class DefectDetectionApp(tk.Tk):
         delta = int(-1 * (event.delta / 120))
         self.right_canvas.yview_scroll(delta, "units")
 
+    def _reset_motion_panel(self, message: str = "Controle de stabilite disponible en mode camera.") -> None:
+        self.last_motion_estimate = None
+        self.motion_state_var.set("Etat du mouvement : hors camera")
+        self.motion_score_var.set("Score de mouvement : n/a")
+        self.motion_points_var.set("Points suivis : n/a")
+        self.motion_displacement_var.set("Deplacement moyen : n/a")
+        self.motion_quality_var.set("Qualite capture : n/a")
+        self.motion_message_var.set(message)
+        self._set_motion_card("off")
+
+    def _display_motion_estimate(self, estimate: MotionEstimate | None) -> None:
+        if estimate is None:
+            self._reset_motion_panel()
+            return
+
+        self.last_motion_estimate = estimate
+        self.motion_state_var.set(f"Etat du mouvement : {estimate.status}")
+        self.motion_score_var.set(f"Score de mouvement : {estimate.motion_score:.3f}")
+        self.motion_points_var.set(
+            f"Points suivis : {estimate.tracked_points} / {estimate.detected_points}"
+        )
+        self.motion_displacement_var.set(f"Deplacement moyen : {estimate.mean_displacement:.3f} px")
+        self.motion_quality_var.set(f"Qualite capture : {estimate.capture_quality}")
+        self.motion_message_var.set(estimate.message)
+
+        status_to_style = {
+            "Initialisation": "init",
+            "Stable": "stable",
+            "En mouvement": "moving",
+            "Instable": "unstable",
+            "Indisponible": "warning",
+        }
+        self._set_motion_card(status_to_style.get(estimate.status, "warning"))
+
+    def _set_motion_card(self, state: str) -> None:
+        card_styles = {
+            "off": (COLOR_PANEL_ALT, COLOR_TEXT, "#27364a", "HORS CAMERA"),
+            "init": ("#11273a", COLOR_ACCENT, "#0b4f6c", "INITIALISATION"),
+            "stable": ("#0b3021", COLOR_OK, "#047857", "STABLE"),
+            "moving": ("#2c240d", COLOR_WARNING, "#b45309", "EN MOUVEMENT"),
+            "unstable": ("#401519", COLOR_DEFECT, "#b91c1c", "INSTABLE"),
+            "warning": ("#2a2530", COLOR_WARNING, "#92400e", "A VERIFIER"),
+        }
+        background, accent, badge_bg, badge_text = card_styles.get(state, card_styles["warning"])
+
+        self.motion_box.configure(background=background, highlightbackground=accent)
+        self.motion_badge.configure(text=badge_text, background=badge_bg, foreground=COLOR_TEXT)
+        self.motion_state_label.configure(background=background, foreground=accent)
+        self.motion_message_label.configure(background=background, foreground=COLOR_MUTED)
+        self.motion_score_label.configure(background=background, foreground=COLOR_TEXT)
+        self.motion_points_label.configure(background=background, foreground=COLOR_TEXT)
+        self.motion_displacement_label.configure(background=background, foreground=COLOR_TEXT)
+        self.motion_quality_label.configure(background=background, foreground=accent)
+
     def import_image(self) -> None:
         path = filedialog.askopenfilename(
             title="Selectionner une image",
@@ -412,8 +564,11 @@ class DefectDetectionApp(tk.Tk):
         self.stop_camera()
         self.current_image = image
         self.current_image_path = Path(path)
+        self.current_source_kind = "image"
+        self.motion_estimator.reset()
         self.source_var.set(f"Source : image importee - {self.current_image_path.name}")
         self.status_var.set("Image importee. Lancez la prediction ou ouvrez une vue du pipeline.")
+        self._reset_motion_panel("Controle de stabilite indisponible sur une image importee.")
         self._show_image(image)
         self._refresh_pipeline_windows(include_stats=VIEW_FEATURES in self.pipeline_windows)
 
@@ -430,8 +585,11 @@ class DefectDetectionApp(tk.Tk):
         self.camera = camera
         self.camera_running = True
         self.current_image_path = None
+        self.current_source_kind = "camera"
+        self.motion_estimator.reset()
         self.source_var.set("Source : camera PC")
         self.status_var.set("Camera ouverte.")
+        self._reset_motion_panel("Initialisation du suivi Lucas-Kanade en attente.")
         self._update_camera_frame()
 
     def stop_camera(self) -> None:
@@ -446,15 +604,23 @@ class DefectDetectionApp(tk.Tk):
             messagebox.showwarning("Aucune image", "Aucune frame camera disponible a capturer.")
             return
         self.stop_camera()
+        self.current_source_kind = "capture"
         self.source_var.set("Source : capture camera")
         self.status_var.set("Frame capturee. Lancez la prediction.")
         self._show_image(self.current_image)
         self._refresh_pipeline_windows(include_stats=True)
 
-    def run_prediction(self) -> None:
+    def run_prediction(self, show_warning: bool = True) -> None:
         if self.current_image is None:
             messagebox.showwarning("Aucune image", "Importez une image ou ouvrez la camera avant de lancer l'analyse.")
             return
+
+        if self.current_source_kind in {"camera", "capture"} and self.last_motion_estimate is not None:
+            if self.last_motion_estimate.should_block_prediction:
+                self.status_var.set(self.last_motion_estimate.message)
+                if show_warning:
+                    messagebox.showwarning("Capture instable", self.last_motion_estimate.message)
+                return
 
         method = self.method_var.get()
         try:
@@ -472,7 +638,9 @@ class DefectDetectionApp(tk.Tk):
         self.stop_camera()
         self.current_image = None
         self.current_image_path = None
+        self.current_source_kind = "none"
         self.pipeline_visualization = None
+        self.motion_estimator.reset()
         self.preview_label.configure(image="", text="Aucune image chargee")
         self._photo_ref = None
         self.prediction_var.set("Aucune prediction")
@@ -481,6 +649,7 @@ class DefectDetectionApp(tk.Tk):
         self.summary_var.set("Resume : aucune analyse lancee.")
         self.source_var.set("Source : aucune")
         self._set_result_card("neutral")
+        self._reset_motion_panel()
         self._write_stats("Aucune analyse lancee.")
         self._close_pipeline_windows()
         self.status_var.set("Interface reinitialisee.")
@@ -540,6 +709,8 @@ class DefectDetectionApp(tk.Tk):
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         self.current_image = gray
+        motion_estimate = self.motion_estimator.update(gray)
+        self._display_motion_estimate(motion_estimate)
         self._show_image(gray)
 
         now = int(self.tk.call("clock", "milliseconds"))
@@ -549,7 +720,10 @@ class DefectDetectionApp(tk.Tk):
 
         if self.predict_live.get() and now - self._last_live_prediction_ms > 1200:
             self._last_live_prediction_ms = now
-            self.run_prediction()
+            if motion_estimate.status == "Stable":
+                self.run_prediction(show_warning=False)
+            else:
+                self.status_var.set(motion_estimate.message)
 
         self.after(30, self._update_camera_frame)
 
@@ -690,6 +864,21 @@ class DefectDetectionApp(tk.Tk):
                 lines.append(f"- {key}: {value:.6f}")
             else:
                 lines.append(f"- {key}: {value}")
+
+        if self.current_source_kind in {"camera", "capture"} and self.last_motion_estimate is not None:
+            motion = self.last_motion_estimate
+            lines.extend(
+                [
+                    "",
+                    "Controle de stabilite camera :",
+                    f"- etat mouvement: {motion.status}",
+                    f"- score mouvement: {motion.motion_score:.6f}",
+                    f"- points suivis: {motion.tracked_points}",
+                    f"- deplacement moyen: {motion.mean_displacement:.6f}",
+                    f"- qualite capture: {motion.capture_quality}",
+                    f"- message mouvement: {motion.message}",
+                ]
+            )
 
         return "\n".join(lines)
 

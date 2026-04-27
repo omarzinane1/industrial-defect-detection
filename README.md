@@ -1,90 +1,46 @@
-# Détection de défauts industriels sur pièces de fonderie
+# Detection de defauts industriels sur pieces de fonderie
 
-## Présentation du projet
+## Contexte
 
-Dans ce projet, j’ai travaillé sur la **détection automatique de défauts industriels** à partir d’images de **pièces de fonderie** vues de dessus.
+Ce projet porte sur la detection automatique de defauts sur des pieces de fonderie a partir d'images en niveaux de gris. Les images sont vues de dessus et appartiennent a deux classes :
 
-Les images utilisées sont en **niveaux de gris** et appartiennent à deux classes :
+- `OK` : piece correcte
+- `Defective` : piece presentant un defaut visible
 
-* **OK** : pièce correcte
-* **Defective** : pièce défectueuse
+L'objectif est de construire un projet clair, progressif et exploitable, en comparant deux approches :
 
-L’idée principale du projet est de construire une démarche complète et claire pour savoir si une pièce est bonne ou non à partir de son image.
+- une approche classique de traitement d'image avec decision par regles ;
+- une approche de Machine Learning classique basee sur SVM.
 
-Je n’ai pas voulu faire directement quelque chose de trop complexe. J’ai préféré suivre une logique simple et progressive, comme dans un vrai travail d’analyse :
+Le projet contient aussi une interface Tkinter pour tester les predictions sur image importee ou via la camera du PC.
 
-1. comprendre les images
-2. appliquer des techniques de traitement d’image
-3. extraire des mesures utiles
-4. prendre une décision
-5. ensuite comparer cette première approche avec une approche Machine Learning
+## Problematique
 
-Le projet compare donc **deux approches** :
+Dans un contexte industriel, l'inspection visuelle manuelle peut etre lente, repetitive et sensible a la fatigue. Ce projet cherche donc a automatiser une partie du controle qualite avec une logique simple et pedagogique :
 
-* **Approche 1 : traitement d’image classique + décision par règles**
-* **Approche 2 : traitement d’image + modèle SVM**
+1. charger les images ;
+2. les pretraiter ;
+3. isoler des zones suspectes ;
+4. extraire des mesures utiles ;
+5. prendre une decision finale.
 
-Le but est de voir la différence entre une méthode plus explicable, basée sur des règles, et une méthode de Machine Learning classique.
+## Objectifs
 
----
+Les objectifs principaux sont :
 
-## Pourquoi ce projet
-
-Dans l’industrie, le contrôle qualité est souvent très important. Une pièce défectueuse peut provoquer des pertes, des retards, ou des problèmes dans la production.
-
-Quand l’inspection se fait manuellement, elle peut être :
-
-* lente
-* répétitive
-* fatigante
-* sensible à l’erreur humaine
-
-L’objectif de ce projet est donc de tester une solution automatique capable d’aider à distinguer les pièces saines des pièces défectueuses à partir d’images.
-
-Ce projet m’a aussi permis de travailler de manière pratique sur plusieurs notions importantes :
-
-* traitement d’image
-* segmentation
-* extraction de caractéristiques
-* classification
-* comparaison de méthodes
-* organisation propre d’un projet Python
-
----
-
-## Objectif
-
-L’objectif général est de construire un système capable de prédire si une image correspond à une pièce :
-
-* **OK**
-* ou **Defective**
-
-Pour cela, j’ai organisé le travail en deux grandes parties :
-
-### 1. Approche classique
-
-Dans cette partie, je passe par les étapes classiques de vision par ordinateur :
-
-* prétraitement
-* filtrage
-* amélioration du contraste
-* seuillage
-* contours
-* segmentation
-* extraction de mesures
-* décision finale par règles
-
-### 2. Approche Machine Learning
-
-Dans cette partie, je transforme les images en **caractéristiques numériques**, puis j’utilise un modèle **SVM** pour faire la classification.
-
-Enfin, je compare les deux approches avec les mêmes métriques.
-
----
+- visualiser et comprendre le dataset ;
+- construire un pipeline simple de traitement d'image ;
+- segmenter les zones suspectes ;
+- extraire des caracteristiques interpretable ;
+- implementer une approche par regles ;
+- entrainer un modele SVM ;
+- comparer les deux approches ;
+- proposer une interface desktop simple pour les tests ;
+- ajouter un controle de stabilite camera avec Lucas-Kanade.
 
 ## Dataset
 
-Le dataset doit être placé dans ce dossier :
+Le dataset doit etre place dans le dossier suivant :
 
 ```text
 data/raw/casting_data/
@@ -96,12 +52,12 @@ data/raw/casting_data/
     └── def_front/
 ```
 
-Le projet lit directement cette structure. Les labels sont interprétés comme suit :
+Le code lit automatiquement cette structure.
 
-* `ok_front` → **OK** → label `0`
-* `def_front` → **Defective** → label `1`
+Labels utilises :
 
----
+- `ok_front` -> `OK` -> label `0`
+- `def_front` -> `Defective` -> label `1`
 
 ## Structure du projet
 
@@ -128,8 +84,10 @@ industrial-defect-detection/
 │   ├── features.py
 │   ├── rules.py
 │   ├── ml_models.py
+│   ├── motion.py
 │   ├── evaluation.py
 │   ├── inference.py
+│   ├── pipeline_visualization.py
 │   └── utils.py
 ├── results/
 │   ├── figures/
@@ -142,173 +100,88 @@ industrial-defect-detection/
 └── main.py
 ```
 
-Cette organisation me permet de séparer :
+## Methodologie
 
-* les **données**
-* les **notebooks**
-* la **logique du projet**
-* les **résultats**
-* l’**interface utilisateur**
+Le projet suit une logique progressive.
 
----
+### 1. Traitement d'image + regles
 
-## Démarche suivie
+On commence par une approche simple et explicable :
 
-J’ai choisi une démarche progressive.
+1. lecture de l'image en niveaux de gris ;
+2. redimensionnement ;
+3. reduction du bruit ;
+4. amelioration du contraste ;
+5. seuillage ;
+6. segmentation des zones suspectes ;
+7. extraction de mesures ;
+8. decision finale par regles.
 
-### Première étape : comprendre les images
+Cette approche permet de comprendre visuellement le probleme et de relier chaque decision a des mesures simples.
 
-Avant de parler de modèle, j’ai commencé par observer le dataset pour voir :
+### 2. Traitement d'image + SVM
 
-* la forme générale des pièces
-* les différences visibles entre OK et Defective
-* les variations d’intensité
-* les zones qui semblent suspectes
+La seconde approche reutilise le pipeline d'image, mais remplace la decision fixe par un modele SVM.
 
-### Deuxième étape : traitement d’image classique
+Caracteristiques principales :
 
-Ensuite, j’ai appliqué plusieurs techniques de traitement d’image pour faire ressortir les défauts :
+- statistiques d'intensite ;
+- histogrammes de niveaux de gris ;
+- texture GLCM ;
+- texture LBP ;
+- mesures de segmentation.
 
-* prétraitement
-* filtrage
-* contraste
-* seuillage
-* détection de contours
-* segmentation
+Le pipeline SVM contient :
 
-Le but ici était de transformer l’image brute en informations plus faciles à exploiter.
+1. preparation de `X` et `y` ;
+2. normalisation avec `StandardScaler` ;
+3. apprentissage avec un SVM RBF ;
+4. prediction sur le test ;
+5. sauvegarde du modele et des metriques.
 
-### Troisième étape : décision par règles
+### 3. Controle de stabilite camera avec Lucas-Kanade
 
-Après la segmentation, j’ai extrait des mesures simples puis construit une logique de décision par règles pour classer l’image.
+Une brique complementaire a ete ajoutee pour le mode camera. Elle ne remplace pas les predictions rules ou SVM. Elle sert uniquement a evaluer la stabilite de la scene avant l'analyse.
 
-### Quatrième étape : approche SVM
+Cette brique repose sur OpenCV avec :
 
-Une fois la partie classique bien comprise, j’ai construit une deuxième approche basée sur un modèle **SVM** à partir de caractéristiques extraites des images.
+- `cv2.goodFeaturesToTrack`
+- `cv2.calcOpticalFlowPyrLK`
 
-### Cinquième étape : comparaison finale
+Le principe est simple :
 
-Enfin, j’ai comparé les deux approches avec les mêmes métriques pour voir laquelle fonctionne le mieux.
+1. conserver la frame precedente en grayscale ;
+2. detecter de bons points a suivre ;
+3. suivre ces points sur la frame suivante ;
+4. calculer les vecteurs de deplacement ;
+5. produire un score global de mouvement ;
+6. afficher un etat simple :
+   - `Stable`
+   - `En mouvement`
+   - `Instable`
 
----
+Cette information est utile pour :
 
-## Approche 1 : traitement d’image + règles
+- verifier que la piece est stable devant la camera ;
+- ameliorer la qualite de capture ;
+- eviter une prediction automatique quand le mouvement est trop fort.
 
-Cette première approche repose uniquement sur des techniques classiques de vision par ordinateur.
+## Technologies utilisees
 
-### Étapes principales
+- Python
+- OpenCV
+- NumPy
+- Pandas
+- Matplotlib
+- scikit-image
+- scikit-learn
+- joblib
+- Pillow
+- pathlib
+- Jupyter
+- Tkinter
 
-* chargement de l’image en niveaux de gris
-* redimensionnement
-* réduction du bruit
-* amélioration du contraste
-* seuillage
-* nettoyage morphologique
-* segmentation des zones sombres ou suspectes
-* extraction de mesures simples
-* décision finale par règles
-
-### Idée
-
-L’idée est simple : si plusieurs indicateurs visuels montrent qu’une pièce semble anormale, alors elle est classée comme **Defective**.
-
-### Ce que cette approche apporte
-
-Cette approche est intéressante parce qu’elle est :
-
-* simple à comprendre
-* facile à expliquer
-* utile pour apprendre
-* proche de la logique classique du traitement d’image
-
-### Limite
-
-Elle dépend beaucoup :
-
-* de la qualité de la segmentation
-* du choix des seuils
-* des conditions visuelles
-
----
-
-## Approche 2 : traitement d’image + SVM
-
-Dans cette deuxième approche, je garde l’idée d’extraire des informations à partir des images, mais au lieu de décider avec des règles fixes, j’utilise un **modèle SVM**.
-
-### Caractéristiques extraites
-
-J’extrais par exemple :
-
-* statistiques d’intensité
-* histogrammes
-* caractéristiques de texture
-* mesures issues de la segmentation
-* autres caractéristiques numériques utiles
-
-### Pipeline
-
-Le pipeline suit cette logique :
-
-1. construire un tableau de caractéristiques
-2. préparer `X` et `y`
-3. normaliser les variables
-4. entraîner le modèle SVM
-5. tester le modèle
-6. sauvegarder les métriques et le modèle
-
-### Ce que cette approche apporte
-
-Le SVM permet de mieux exploiter les combinaisons de caractéristiques et donne des résultats plus performants sur ce projet.
-
-### Limite
-
-Il est moins directement interprétable qu’une simple logique par règles.
-
----
-
-## Comparaison des deux approches
-
-Le projet compare les deux approches avec les métriques suivantes :
-
-* accuracy
-* precision
-* recall
-* f1-score
-* matrice de confusion
-
-### Résultats obtenus
-
-| Méthode                     | Accuracy | Precision | Recall   | F1-score |
-| --------------------------- | -------- | --------- | -------- | -------- |
-| Traitement d’image + règles | 0.827972 | 0.796763  | 0.977925 | 0.878097 |
-| Traitement d’image + SVM    | 0.997203 | 0.995604  | 1.000000 | 0.997797 |
-
-### Interprétation
-
-L’approche par règles donne déjà un bon résultat, surtout après amélioration. Elle détecte très bien les pièces défectueuses, ce qui est important dans un contexte industriel.
-
-Mais l’approche **SVM** reste la plus performante globalement, avec des résultats presque parfaits sur ce dataset.
-
----
-
-## Technologies utilisées
-
-Dans ce projet, j’ai utilisé :
-
-* **Python**
-* **OpenCV**
-* **NumPy**
-* **Pandas**
-* **Matplotlib**
-* **scikit-image**
-* **scikit-learn**
-* **joblib**
-* **Jupyter Notebook**
-* **Tkinter**
-
-Je n’ai pas utilisé de Deep Learning dans ce projet. Le but était de construire une solution claire, progressive et bien maîtrisée. 
-
----
+Aucun deep learning n'est utilise.
 
 ## Installation
 
@@ -330,19 +203,9 @@ Puis :
 pip install -r requirements.txt
 ```
 
-Si `pip` pose problème, on peut aussi utiliser :
+## Execution recommandee
 
-```bash
-py -m pip install -r requirements.txt
-```
-
----
-
-## Comment exécuter le projet
-
-### Avec les notebooks
-
-Le mieux est d’ouvrir les notebooks dans l’ordre :
+Ouvrir les notebooks dans l'ordre :
 
 1. `01_visualisation_dataset.ipynb`
 2. `02_pretraitement_filtrage.ipynb`
@@ -353,186 +216,244 @@ Le mieux est d’ouvrir les notebooks dans l’ordre :
 7. `07_modele_svm.ipynb`
 8. `08_comparaison_finale.ipynb`
 
-Cette suite permet de suivre toute la logique du projet étape par étape.
+Le notebook 06 genere :
 
-### Avec `main.py`
+```text
+data/features/casting_features.csv
+```
 
-Pour un test rapide :
+Le notebook 07 sauvegarde :
+
+```text
+results/models/svm_model.joblib
+```
+
+## Execution rapide avec main.py
 
 ```bash
 python main.py
 ```
 
-Ce fichier applique le pipeline principal sur une image et affiche une prédiction.
+Ce script charge une image, applique le pipeline principal et affiche une prediction simple.
 
----
+## Interface desktop Tkinter
 
-## Interface Tkinter
-
-J’ai aussi ajouté une interface desktop avec **Tkinter** pour utiliser le projet de manière plus simple.
-
-### Lancer l’application
+L'application se lance avec :
 
 ```bash
 python app_tkinter.py
 ```
 
-### Ce que permet l’interface
+Fonctionnalites principales :
 
-L’application permet de :
+- choix explicite entre `Traitement d'image + regles` et `Traitement d'image + SVM`
+- import d'image depuis le PC
+- ouverture de la camera du PC
+- capture d'une frame camera
+- prediction sur l'image courante
+- affichage des statistiques utiles
+- vues secondaires du pipeline
+- controle de stabilite camera par Lucas-Kanade
 
-* choisir la méthode :
+### Informations affichees
 
-  * **Traitement d’image + règles**
-  * **Traitement d’image + SVM**
-* importer une image depuis le PC
-* ouvrir la caméra du PC
-* capturer une image
-* lancer une prédiction
-* afficher la classe prédite
-* afficher des statistiques utiles selon la méthode choisie
+L'interface affiche notamment :
 
-### Ce que j’ai voulu avec cette interface
+- la methode choisie ;
+- la source utilisee ;
+- la decision finale ;
+- le score ou la confiance si disponible ;
+- le statut de validation de l'image ;
+- des statistiques liees a la prediction ;
+- l'etat du mouvement en mode camera ;
+- le score de mouvement ;
+- le nombre de points suivis ;
+- le deplacement moyen ;
+- un message de stabilite.
 
-Je voulais une interface :
+### Role de Lucas-Kanade dans l'interface
 
-* claire
-* simple
-* propre
-* professionnelle
-* facile à tester
+Le suivi Lucas-Kanade est actif surtout pour le flux camera.
 
-L’idée est de rendre le projet plus concret, plus visuel, et plus facile à présenter.
+Il sert a :
 
----
+- detecter si la scene est stable ;
+- informer l'utilisateur si la piece bouge trop ;
+- faciliter une meilleure capture avant prediction ;
+- limiter la prediction automatique en mode semi temps reel lorsque la scene est instable.
 
-## Description rapide des notebooks
+Quand le mouvement est trop fort, l'application affiche un message du type :
+
+```text
+Stabilisez la piece avant l'analyse.
+```
+
+### Tester le mouvement camera
+
+1. lancer `python app_tkinter.py`
+2. ouvrir la camera ;
+3. observer le panneau de stabilite ;
+4. laisser la scene immobile pour obtenir `Stable` ;
+5. bouger fortement la camera ou la piece pour observer `En mouvement` ou `Instable` ;
+6. revenir a une scene calme avant de lancer la prediction.
+
+## Description des notebooks
 
 ### 01 - Visualisation du dataset
 
-Ce notebook sert à explorer le dataset, afficher des exemples, vérifier la structure des données et mieux comprendre les images.
+Construit l'index du dataset, resume les classes et affiche des exemples.
 
-### 02 - Prétraitement et filtrage
+### 02 - Pretraitement et filtrage
 
-Dans ce notebook, je teste les premières opérations de préparation des images : resize, filtrage, réduction du bruit.
+Montre les filtres de bruit et l'amelioration du contraste.
 
 ### 03 - Contraste, seuillage et contours
 
-Ici, je travaille sur l’amélioration du contraste, le seuillage et la détection de contours.
+Applique Otsu, le seuillage adaptatif et Canny.
 
 ### 04 - Segmentation et mesures
 
-Ce notebook permet d’isoler les zones suspectes et de calculer des mesures simples.
+Nettoie les masques et extrait des mesures simples sur les regions detectees.
 
-### 05 - Décision par règles
+### 05 - Decision par regles
 
-Dans cette étape, je construis l’approche classique de classification sans Machine Learning.
+Evalue l'approche classique sans Machine Learning.
 
-### 06 - Extraction de caractéristiques ML
+### 06 - Extraction de caracteristiques ML
 
-Je transforme les images en données tabulaires exploitables par un modèle de Machine Learning.
+Construit le dataset tabulaire des features.
 
-### 07 - Modèle SVM
+### 07 - Modele SVM
 
-Dans ce notebook, j’entraîne et j’évalue le modèle SVM.
+Prepare les donnees, entraine le SVM et sauvegarde le modele.
 
 ### 08 - Comparaison finale
 
-Ici, je compare les performances finales des deux approches.
+Compare l'approche par regles et l'approche SVM avec les memes metriques.
 
----
+## Description des fichiers src/
 
-## Description rapide des fichiers `src`
+### preprocessing.py
 
-### `preprocessing.py`
+Chargement, redimensionnement, normalisation et pretraitement principal.
 
-Fonctions de chargement, redimensionnement et prétraitement.
+### filtering.py
 
-### `filtering.py`
+Filtres classiques : gaussien, median, bilateral, egalisation d'histogramme, CLAHE.
 
-Filtres classiques et amélioration du contraste.
+### segmentation.py
 
-### `segmentation.py`
+Seuillage, nettoyage morphologique, contours et segmentation des zones sombres.
 
-Seuillage, contours, opérations morphologiques et segmentation.
+### features.py
 
-### `features.py`
+Extraction des caracteristiques numeriques : intensite, histogrammes, texture et mesures de segmentation.
 
-Extraction des caractéristiques numériques à partir des images.
+### rules.py
 
-### `rules.py`
+Logique de decision par regles, calibration des seuils et explication de prediction.
 
-Logique de décision par règles.
+### ml_models.py
 
-### `ml_models.py`
+Preparation de `X` et `y`, creation du pipeline SVM, entrainement, chargement et sauvegarde.
 
-Préparation des données et entraînement du SVM.
+### motion.py
 
-### `evaluation.py`
+Estimation de mouvement par Lucas-Kanade pour le flux camera :
 
-Calcul et sauvegarde des métriques.
+- preparation des frames grayscale ;
+- detection de points a suivre ;
+- suivi des points entre deux frames ;
+- calcul des deplacements ;
+- score global de mouvement ;
+- decision simple de stabilite.
 
-### `inference.py`
+### evaluation.py
 
-Fonctions de prédiction réutilisées par l’interface Tkinter.
+Metriques, rapports de classification, matrices de confusion et sauvegarde des resultats.
 
-### `utils.py`
+### inference.py
 
-Fonctions utilitaires pour les chemins, l’index du dataset et quelques aides générales.
+Fonctions de prediction reutilisees par l'interface Tkinter.
 
----
+### pipeline_visualization.py
 
-## Ce que ce projet montre
+Generation des vues intermediaires du pipeline pour l'interface.
 
-À travers ce projet, j’ai voulu montrer que je peux :
+### utils.py
 
-* organiser un projet Python proprement
-* travailler sur un problème industriel réel
-* utiliser le traitement d’image de manière concrète
-* construire une logique de décision par règles
-* entraîner un modèle de Machine Learning classique
-* comparer deux approches sur le même problème
-* ajouter une interface utilisateur pour rendre le projet plus exploitable
+Chemins du projet, index du dataset, resumes et fonctions utilitaires.
 
----
+## Resultats attendus
 
-## Limites du projet
+A la fin du projet, on obtient :
 
-Même si le projet donne de bons résultats, il a aussi quelques limites :
+- un pipeline classique de traitement d'image ;
+- une decision par regles ;
+- un modele SVM entraine ;
+- des metriques sauvegardees ;
+- une interface Tkinter exploitable ;
+- un controle de stabilite camera ;
+- une comparaison claire entre les deux approches.
 
-* il dépend du dataset utilisé
-* les règles restent sensibles aux seuils
-* les performances peuvent changer sur d’autres images
-* le SVM dépend de la qualité des caractéristiques extraites
+## Avantages et limites
 
----
+### Traitement d'image + regles
 
-## Pistes d’amélioration
+Avantages :
 
-Plus tard, ce projet peut être amélioré avec :
+- simple a comprendre ;
+- rapide ;
+- interpretable.
 
-* d’autres descripteurs de texture
-* d’autres modèles classiques
-* une validation plus poussée
-* une meilleure analyse des erreurs
-* une interface encore plus avancée
-* une version temps réel plus robuste
-* éventuellement une approche Deep Learning pour comparaison
+Limites :
 
----
+- sensible aux seuils ;
+- moins flexible ;
+- sensible aux conditions d'image.
 
-## Conclusion
+### Traitement d'image + SVM
 
-Ce projet m’a permis de construire une démarche complète autour de la détection de défauts industriels.
+Avantages :
 
-J’ai commencé par une approche simple et explicable basée sur le traitement d’image classique, puis j’ai ajouté une approche SVM plus performante. Enfin, j’ai intégré le tout dans une interface Tkinter pour rendre le projet plus concret et plus facile à utiliser.
+- exploite plusieurs features a la fois ;
+- tres performant sur le dataset ;
+- plus flexible qu'une simple regle.
 
-Le projet est donc à la fois :
+Limites :
 
-* pédagogique
-* technique
-* pratique
-* structuré
-* réutilisable
+- depend de la qualite des features ;
+- moins interpretable qu'une regle manuelle.
 
-Et surtout, il montre bien comment passer d’une image brute à une décision finale dans un contexte de contrôle qualité industriel.
+### Lucas-Kanade pour la stabilite camera
+
+Avantages :
+
+- coherent avec un cours de vision par ordinateur ;
+- adapte au flux webcam ;
+- simple a integrer avec OpenCV ;
+- utile pour filtrer les captures instables.
+
+Limites :
+
+- depend de la presence de points d'interet ;
+- moins informatif si la scene est trop uniforme ;
+- ne remplace pas une vraie acquisition controlee en environnement industriel.
+
+## Pistes d'amelioration
+
+- ajuster les seuils de stabilite ;
+- visualiser les vecteurs de mouvement dans une fenetre dediee ;
+- memoriser plusieurs frames stables avant prediction ;
+- comparer Lucas-Kanade a d'autres approches de flot optique ;
+- tester d'autres classifieurs classiques ;
+- analyser les erreurs image par image.
+
+## Messages de commit recommandes
+
+```text
+Add Lucas-Kanade motion estimation module for camera stability
+Integrate camera motion status into Tkinter interface
+Gate live camera predictions with motion stability checks
+Document Lucas-Kanade stability control in README
+```
